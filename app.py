@@ -1,17 +1,16 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS - Sistema Profesional con SQLite         ║
-║  Recibe IDs, guarda clientes, genera y valida licencias       ║
+║     API DE LICENCIAS - VERSIÓN VERCEL (Sin SQLite)            ║
+║  Funciona sin base de datos, datos en memoria                 ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
 from flask import Flask, render_template_string, request, jsonify
-import sqlite3
-import os
 import hmac
 import hashlib
 from datetime import datetime, timedelta
-import uuid
+import json
+import os
 
 app = Flask(__name__)
 
@@ -20,47 +19,48 @@ app = Flask(__name__)
 # ============================================
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-DB_FILE = "licencias.db"
+CLIENTES_FILE = "/tmp/clientes.json"
+LICENCIAS_FILE = "/tmp/licencias.json"
 
 # ============================================
-# BASE DE DATOS SQLite
+# FUNCIONES AUXILIARES
 # ============================================
 
-def inicializar_db():
-    """Crea las tablas si no existen"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    # Tabla de clientes
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id TEXT UNIQUE,
-            fecha_registro TEXT,
-            email TEXT,
-            estado TEXT
-        )
-    """)
-    
-    # Tabla de licencias
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS licencias (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id TEXT UNIQUE,
-            email TEXT,
-            codigo_licencia TEXT,
-            fecha_compra TEXT,
-            dias INTEGER,
-            fecha_expiracion TEXT,
-            activa INTEGER,
-            FOREIGN KEY(client_id) REFERENCES clientes(client_id)
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+def cargar_clientes():
+    """Carga lista de clientes"""
+    try:
+        if os.path.exists(CLIENTES_FILE):
+            with open(CLIENTES_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
 
-inicializar_db()
+def guardar_clientes(clientes):
+    """Guarda lista de clientes"""
+    try:
+        with open(CLIENTES_FILE, 'w') as f:
+            json.dump(clientes, f, indent=2)
+    except:
+        pass
+
+def cargar_licencias():
+    """Carga lista de licencias"""
+    try:
+        if os.path.exists(LICENCIAS_FILE):
+            with open(LICENCIAS_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+def guardar_licencias(licencias):
+    """Guarda lista de licencias"""
+    try:
+        with open(LICENCIAS_FILE, 'w') as f:
+            json.dump(licencias, f, indent=2)
+    except:
+        pass
 
 # ============================================
 # FUNCIONES DE LICENCIAS
@@ -117,23 +117,20 @@ def registrar_cliente():
         if not client_id:
             return jsonify({'exito': False, 'mensaje': 'ID vacío'})
         
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        clientes = cargar_clientes()
         
         # Verificar si ya existe
-        cursor.execute("SELECT * FROM clientes WHERE client_id = ?", (client_id,))
-        if cursor.fetchone():
-            conn.close()
+        if client_id in clientes:
             return jsonify({'exito': True, 'mensaje': 'Cliente ya registrado'})
         
         # Insertar nuevo cliente
-        cursor.execute("""
-            INSERT INTO clientes (client_id, fecha_registro, estado)
-            VALUES (?, ?, ?)
-        """, (client_id, datetime.now().isoformat(), 'pendiente'))
+        clientes[client_id] = {
+            'fecha_registro': datetime.now().isoformat(),
+            'email': None,
+            'estado': 'pendiente'
+        }
         
-        conn.commit()
-        conn.close()
+        guardar_clientes(clientes)
         
         return jsonify({'exito': True, 'mensaje': 'Cliente registrado'})
     except Exception as e:
@@ -157,24 +154,27 @@ def generar_licencia():
         # Generar código
         codigo = generar_codigo_licencia(client_id, email, dias)
         
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        
         # Guardar licencia
+        licencias = cargar_licencias()
         fecha_expiracion = (datetime.now() + timedelta(days=dias)).isoformat()
-        cursor.execute("""
-            INSERT OR REPLACE INTO licencias 
-            (client_id, email, codigo_licencia, fecha_compra, dias, fecha_expiracion, activa)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (client_id, email, codigo, datetime.now().isoformat(), dias, fecha_expiracion, 1))
+        
+        licencias[client_id] = {
+            'email': email,
+            'codigo': codigo,
+            'fecha_compra': datetime.now().isoformat(),
+            'dias': dias,
+            'fecha_expiracion': fecha_expiracion,
+            'activa': True
+        }
+        
+        guardar_licencias(licencias)
         
         # Actualizar cliente
-        cursor.execute("""
-            UPDATE clientes SET email = ?, estado = ? WHERE client_id = ?
-        """, (email, 'activo', client_id))
-        
-        conn.commit()
-        conn.close()
+        clientes = cargar_clientes()
+        if client_id in clientes:
+            clientes[client_id]['email'] = email
+            clientes[client_id]['estado'] = 'activo'
+            guardar_clientes(clientes)
         
         return jsonify({
             'exito': True,
@@ -198,28 +198,18 @@ def validar_licencia():
         
         client_id, email, dias = resultado
         
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        licencias = cargar_licencias()
         
-        # Buscar licencia
-        cursor.execute("""
-            SELECT fecha_expiracion, activa FROM licencias 
-            WHERE client_id = ? AND email = ?
-        """, (client_id, email))
-        
-        resultado = cursor.fetchone()
-        conn.close()
-        
-        if not resultado:
+        if client_id not in licencias:
             return jsonify({'exito': False, 'mensaje': 'Licencia no encontrada'})
         
-        fecha_exp, activa = resultado
+        licencia = licencias[client_id]
         
-        if not activa:
+        if not licencia.get('activa'):
             return jsonify({'exito': False, 'mensaje': 'Licencia desactivada'})
         
         # Verificar expiración
-        fecha_expiracion = datetime.fromisoformat(fecha_exp)
+        fecha_expiracion = datetime.fromisoformat(licencia['fecha_expiracion'])
         if datetime.now() > fecha_expiracion:
             return jsonify({'exito': False, 'mensaje': 'Licencia expirada'})
         
@@ -237,32 +227,22 @@ def validar_licencia():
 def lista_clientes():
     """Lista todos los clientes (ADMIN)"""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        clientes = cargar_clientes()
+        licencias = cargar_licencias()
         
-        cursor.execute("""
-            SELECT c.client_id, c.email, c.estado, c.fecha_registro,
-                   l.dias, l.fecha_expiracion
-            FROM clientes c
-            LEFT JOIN licencias l ON c.client_id = l.client_id
-            ORDER BY c.fecha_registro DESC
-        """)
-        
-        resultados = cursor.fetchall()
-        conn.close()
-        
-        clientes = []
-        for row in resultados:
-            clientes.append({
-                'client_id': row[0],
-                'email': row[1],
-                'estado': row[2],
-                'fecha_registro': row[3],
-                'dias': row[4],
-                'expiracion': row[5]
+        resultado = []
+        for client_id, cliente in clientes.items():
+            lic = licencias.get(client_id, {})
+            resultado.append({
+                'client_id': client_id,
+                'email': cliente.get('email'),
+                'estado': cliente.get('estado'),
+                'fecha_registro': cliente.get('fecha_registro'),
+                'dias': lic.get('dias'),
+                'expiracion': lic.get('fecha_expiracion')
             })
         
-        return jsonify({'clientes': clientes})
+        return jsonify({'clientes': resultado})
     except Exception as e:
         return jsonify({'error': str(e)})
 
@@ -471,7 +451,6 @@ def panel_admin():
                 }
             }
             
-            // Cargar clientes al abrir
             cargarClientes();
             setInterval(cargarClientes, 5000);
         </script>
@@ -479,6 +458,10 @@ def panel_admin():
     </html>
     """
     return render_template_string(html)
+
+@app.route('/')
+def index():
+    return jsonify({'mensaje': 'API Antianuncios funcionando', 'admin': '/panel-admin'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
