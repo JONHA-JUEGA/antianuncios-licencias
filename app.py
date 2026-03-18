@@ -21,9 +21,11 @@ app = Flask(__name__)
 # ============================================
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-TU_EMAIL_GMAIL = "ip.and.droid@gmail.com"  # ⭐ EDITA AQUÍ
-TU_PASSWORD_GMAIL = "addgxvmqoywvytht"  # ⭐ EDITA AQUÍ (APP PASSWORD)
-TU_EMAIL_PAYPAL = "Ithan150395@gmail.com"  # ⭐ EDITA AQUÍ
+import os
+
+TU_EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
+TU_PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
+TU_EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
 
 # ============================================
 # FUNCIÓN PARA GENERAR CÓDIGO
