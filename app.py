@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
+import os  # ← AQUÍ, al inicio
 
 app = Flask(__name__)
 
@@ -21,8 +21,6 @@ app = Flask(__name__)
 # ============================================
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-import os
-
 TU_EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
 TU_PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
 TU_EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
