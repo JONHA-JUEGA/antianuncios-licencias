@@ -1,507 +1,484 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║   APP WEB PARA RAILWAY.APP - Licencias desde cualquier lugar  ║
-║        Accede desde tu celular sin estar en casa              ║
+║     API DE LICENCIAS - Sistema Profesional con SQLite         ║
+║  Recibe IDs, guarda clientes, genera y valida licencias       ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
 from flask import Flask, render_template_string, request, jsonify
+import sqlite3
+import os
 import hmac
 import hashlib
 from datetime import datetime, timedelta
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import os  # ← AQUÍ, al inicio
+import uuid
 
 app = Flask(__name__)
 
 # ============================================
-# CONFIGURACIÓN - EDITA ESTOS DATOS
+# CONFIGURACIÓN
 # ============================================
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-TU_EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
-TU_PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
-TU_EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
+DB_FILE = "licencias.db"
 
 # ============================================
-# FUNCIÓN PARA GENERAR CÓDIGO
+# BASE DE DATOS SQLite
 # ============================================
 
-def generar_codigo_licencia(email, dias=180):
-    """Genera un código de licencia válido"""
-    mensaje = f"{email}|{dias}"
+def inicializar_db():
+    """Crea las tablas si no existen"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Tabla de clientes
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE,
+            fecha_registro TEXT,
+            email TEXT,
+            estado TEXT
+        )
+    """)
+    
+    # Tabla de licencias
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS licencias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE,
+            email TEXT,
+            codigo_licencia TEXT,
+            fecha_compra TEXT,
+            dias INTEGER,
+            fecha_expiracion TEXT,
+            activa INTEGER,
+            FOREIGN KEY(client_id) REFERENCES clientes(client_id)
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+inicializar_db()
+
+# ============================================
+# FUNCIONES DE LICENCIAS
+# ============================================
+
+def generar_codigo_licencia(client_id, email, dias=180):
+    """Genera código de licencia único"""
+    mensaje = f"{client_id}|{email}|{dias}"
     firma = hmac.new(
         CLAVE_SECRETA.encode(),
         mensaje.encode(),
         hashlib.sha256
     ).hexdigest()
     
-    codigo = f"{email}|{dias}|{firma}"
+    codigo = f"{client_id}|{email}|{dias}|{firma}"
     return codigo
 
-
-def enviar_email(email_cliente, codigo):
-    """Envía el código de licencia por email al cliente"""
+def validar_codigo_licencia(codigo):
+    """Valida un código de licencia"""
     try:
-        asunto = "🎉 Tu Licencia Antianuncios iP&Droid - ¡Activada!"
+        partes = codigo.split("|")
+        if len(partes) != 4:
+            return False, "Formato inválido"
         
-        cuerpo_html = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
-                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                    
-                    <h1 style="color: #2196F3; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
-                    
-                    <h2 style="color: #333; text-align: center;">¡Licencia Activada!</h2>
-                    
-                    <p style="color: #666; font-size: 16px;">
-                        Hola, gracias por tu compra. Tu licencia ha sido generada y está lista para usar.
-                    </p>
-                    
-                    <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50;">
-                        <p style="color: #999; font-size: 12px; margin: 0;">TU CÓDIGO DE LICENCIA:</p>
-                        <p style="color: #000; font-size: 18px; font-weight: bold; word-break: break-all; margin: 10px 0;">
-                            {codigo}
-                        </p>
-                    </div>
-                    
-                    <h3 style="color: #333;">📋 Cómo Activar tu Licencia:</h3>
-                    
-                    <ol style="color: #666; line-height: 1.8;">
-                        <li>Abre la app <strong>Antianuncios iP&Droid</strong></li>
-                        <li>Haz clic en <strong>"🔑 Registrar Licencia"</strong></li>
-                        <li>COPIA el código de arriba</li>
-                        <li>PEGA el código en la app</li>
-                        <li>Haz clic en <strong>"✅ Guardar Licencia"</strong></li>
-                        <li>¡LISTO! Tu licencia está activada por 6 meses ✅</li>
-                    </ol>
-                    
-                    <div style="background-color: #FFF3E0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #FF9800;">
-                        <p style="color: #E65100; margin: 0;">
-                            <strong>⏰ IMPORTANTE:</strong> Tu licencia expira en <strong>180 días</strong>.
-                        </p>
-                    </div>
-                    
-                    <p style="color: #999; font-size: 14px; text-align: center; margin-top: 30px;">
-                        Si tienes problemas, contáctanos en: {TU_EMAIL_PAYPAL}
-                    </p>
-                    
-                </div>
-            </body>
-        </html>
-        """
+        client_id, email, dias_str, firma_proporcionada = partes
+        dias = int(dias_str)
         
-        mensaje = MIMEMultipart()
-        mensaje['From'] = TU_EMAIL_GMAIL
-        mensaje['To'] = email_cliente
-        mensaje['Subject'] = asunto
+        # Recalcular firma esperada
+        mensaje = f"{client_id}|{email}|{dias}"
+        firma_esperada = hmac.new(
+            CLAVE_SECRETA.encode(),
+            mensaje.encode(),
+            hashlib.sha256
+        ).hexdigest()
         
-        mensaje.attach(MIMEText(cuerpo_html, 'html'))
+        if firma_proporcionada != firma_esperada:
+            return False, "Firma inválida"
         
-        servidor = smtplib.SMTP('smtp.gmail.com', 587)
-        servidor.starttls()
-        servidor.login(TU_EMAIL_GMAIL, TU_PASSWORD_GMAIL)
-        servidor.send_message(mensaje)
-        servidor.quit()
+        return True, (client_id, email, dias)
+    except:
+        return False, "Error al validar"
+
+# ============================================
+# RUTAS API
+# ============================================
+
+@app.route('/registrar-cliente', methods=['POST'])
+def registrar_cliente():
+    """Recibe el ID del cliente cuando abre la app"""
+    try:
+        datos = request.get_json()
+        client_id = datos.get('client_id')
         
-        return True, "Email enviado correctamente"
+        if not client_id:
+            return jsonify({'exito': False, 'mensaje': 'ID vacío'})
         
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Verificar si ya existe
+        cursor.execute("SELECT * FROM clientes WHERE client_id = ?", (client_id,))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'exito': True, 'mensaje': 'Cliente ya registrado'})
+        
+        # Insertar nuevo cliente
+        cursor.execute("""
+            INSERT INTO clientes (client_id, fecha_registro, estado)
+            VALUES (?, ?, ?)
+        """, (client_id, datetime.now().isoformat(), 'pendiente'))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'exito': True, 'mensaje': 'Cliente registrado'})
     except Exception as e:
-        return False, f"Error al enviar email: {str(e)}"
+        return jsonify({'exito': False, 'mensaje': str(e)})
 
+@app.route('/generar-licencia', methods=['POST'])
+def generar_licencia():
+    """Genera una licencia para un cliente (ADMIN)"""
+    try:
+        datos = request.get_json()
+        client_id = datos.get('client_id')
+        email = datos.get('email')
+        dias = int(datos.get('dias', 180))
+        
+        if not client_id or not email:
+            return jsonify({'exito': False, 'mensaje': 'Datos incompletos'})
+        
+        if dias not in [180, 365]:
+            return jsonify({'exito': False, 'mensaje': 'Días inválidos'})
+        
+        # Generar código
+        codigo = generar_codigo_licencia(client_id, email, dias)
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Guardar licencia
+        fecha_expiracion = (datetime.now() + timedelta(days=dias)).isoformat()
+        cursor.execute("""
+            INSERT OR REPLACE INTO licencias 
+            (client_id, email, codigo_licencia, fecha_compra, dias, fecha_expiracion, activa)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (client_id, email, codigo, datetime.now().isoformat(), dias, fecha_expiracion, 1))
+        
+        # Actualizar cliente
+        cursor.execute("""
+            UPDATE clientes SET email = ?, estado = ? WHERE client_id = ?
+        """, (email, 'activo', client_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Licencia generada',
+            'codigo': codigo
+        })
+    except Exception as e:
+        return jsonify({'exito': False, 'mensaje': str(e)})
 
-# ============================================
-# RUTAS WEB
-# ============================================
+@app.route('/validar-licencia', methods=['POST'])
+def validar_licencia():
+    """Valida una licencia desde main.exe"""
+    try:
+        datos = request.get_json()
+        codigo = datos.get('codigo')
+        
+        # Validar formato
+        valido, resultado = validar_codigo_licencia(codigo)
+        if not valido:
+            return jsonify({'exito': False, 'mensaje': resultado})
+        
+        client_id, email, dias = resultado
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Buscar licencia
+        cursor.execute("""
+            SELECT fecha_expiracion, activa FROM licencias 
+            WHERE client_id = ? AND email = ?
+        """, (client_id, email))
+        
+        resultado = cursor.fetchone()
+        conn.close()
+        
+        if not resultado:
+            return jsonify({'exito': False, 'mensaje': 'Licencia no encontrada'})
+        
+        fecha_exp, activa = resultado
+        
+        if not activa:
+            return jsonify({'exito': False, 'mensaje': 'Licencia desactivada'})
+        
+        # Verificar expiración
+        fecha_expiracion = datetime.fromisoformat(fecha_exp)
+        if datetime.now() > fecha_expiracion:
+            return jsonify({'exito': False, 'mensaje': 'Licencia expirada'})
+        
+        dias_restantes = (fecha_expiracion - datetime.now()).days
+        
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Licencia válida',
+            'dias_restantes': dias_restantes
+        })
+    except Exception as e:
+        return jsonify({'exito': False, 'mensaje': str(e)})
 
-@app.route('/')
-def index():
-    """Página principal"""
+@app.route('/lista-clientes', methods=['GET'])
+def lista_clientes():
+    """Lista todos los clientes (ADMIN)"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT c.client_id, c.email, c.estado, c.fecha_registro,
+                   l.dias, l.fecha_expiracion
+            FROM clientes c
+            LEFT JOIN licencias l ON c.client_id = l.client_id
+            ORDER BY c.fecha_registro DESC
+        """)
+        
+        resultados = cursor.fetchall()
+        conn.close()
+        
+        clientes = []
+        for row in resultados:
+            clientes.append({
+                'client_id': row[0],
+                'email': row[1],
+                'estado': row[2],
+                'fecha_registro': row[3],
+                'dias': row[4],
+                'expiracion': row[5]
+            })
+        
+        return jsonify({'clientes': clientes})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/panel-admin')
+def panel_admin():
+    """Panel admin para generar licencias"""
     html = """
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Generar Licencias - Antianuncios iP&Droid</title>
+        <title>Panel Admin - Antianuncios</title>
         <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
+            * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                display: flex;
-                justify-content: center;
-                align-items: center;
+                background: #f5f5f5;
                 padding: 20px;
             }
-            
             .contenedor {
-                background: white;
-                border-radius: 15px;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                max-width: 500px;
-                width: 100%;
-                padding: 40px;
+                max-width: 1200px;
+                margin: 0 auto;
             }
-            
-            .encabezado {
-                text-align: center;
+            h1 {
+                color: #333;
                 margin-bottom: 30px;
+                text-align: center;
             }
-            
-            .encabezado h1 {
-                font-size: 28px;
-                color: #333;
-                margin-bottom: 5px;
+            .panel {
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             }
-            
-            .encabezado .emoji {
-                font-size: 40px;
-                margin-bottom: 10px;
-            }
-            
-            .encabezado p {
-                color: #999;
-                font-size: 14px;
-            }
-            
             .formulario {
-                display: flex;
-                flex-direction: column;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
                 gap: 15px;
+                margin-bottom: 20px;
             }
-            
-            .grupo-input {
-                display: flex;
-                flex-direction: column;
-            }
-            
-            .grupo-input label {
-                color: #333;
-                font-weight: 600;
-                margin-bottom: 8px;
+            input, select {
+                padding: 10px;
+                border: 2px solid #ddd;
+                border-radius: 5px;
                 font-size: 14px;
             }
-            
-            .grupo-input input,
-            .grupo-input select {
-                padding: 12px;
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                font-size: 14px;
-                transition: border-color 0.3s;
-                font-family: inherit;
-            }
-            
-            .grupo-input input:focus,
-            .grupo-input select:focus {
+            input:focus, select:focus {
                 outline: none;
-                border-color: #667eea;
-                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+                border-color: #4CAF50;
             }
-            
-            .btn-generar {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            button {
+                background: #4CAF50;
                 color: white;
+                padding: 10px 20px;
                 border: none;
-                padding: 14px 20px;
-                border-radius: 8px;
-                font-size: 16px;
-                font-weight: 600;
+                border-radius: 5px;
                 cursor: pointer;
-                transition: transform 0.2s, box-shadow 0.2s;
-                margin-top: 10px;
+                font-weight: bold;
+                grid-column: 1 / -1;
             }
-            
-            .btn-generar:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            button:hover {
+                background: #45a049;
             }
-            
-            .btn-generar.cargando {
-                opacity: 0.7;
-                cursor: not-allowed;
-            }
-            
-            .resultado {
-                display: none;
-                background: #f0f7ff;
-                border-left: 4px solid #4CAF50;
-                padding: 15px;
-                border-radius: 8px;
+            table {
+                width: 100%;
+                border-collapse: collapse;
                 margin-top: 20px;
             }
-            
-            .resultado.exito {
+            table th {
+                background: #4CAF50;
+                color: white;
+                padding: 12px;
+                text-align: left;
+            }
+            table td {
+                padding: 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            table tr:hover {
+                background: #f9f9f9;
+            }
+            .resultado {
                 background: #E8F5E9;
-                border-left-color: #4CAF50;
+                border-left: 4px solid #4CAF50;
+                padding: 15px;
+                margin-top: 15px;
+                border-radius: 5px;
+                display: none;
             }
-            
-            .resultado.error {
-                background: #FFEBEE;
-                border-left-color: #f44336;
-            }
-            
             .resultado.activo {
                 display: block;
             }
-            
-            .resultado-titulo {
-                font-weight: 600;
-                margin-bottom: 8px;
-                color: #333;
-            }
-            
-            .resultado-mensaje {
-                color: #666;
-                font-size: 14px;
-                line-height: 1.6;
-            }
-            
-            .codigo-generado {
-                background: white;
-                padding: 15px;
+            .codigo {
+                background: #f0f0f0;
+                padding: 10px;
                 border-radius: 5px;
-                margin-top: 10px;
                 word-break: break-all;
-                font-family: 'Courier New', monospace;
+                font-family: monospace;
                 font-size: 12px;
-                color: #000;
-                border: 1px solid #ddd;
-            }
-            
-            .btn-copiar {
-                background: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 12px;
-                border-radius: 5px;
-                font-size: 12px;
-                cursor: pointer;
                 margin-top: 10px;
-                transition: background 0.3s;
-            }
-            
-            .btn-copiar:hover {
-                background: #45a049;
-            }
-            
-            .cargando-spinner {
-                display: none;
-                text-align: center;
-                margin-top: 10px;
-            }
-            
-            .spinner {
-                border: 3px solid #f3f3f3;
-                border-top: 3px solid #667eea;
-                border-radius: 50%;
-                width: 30px;
-                height: 30px;
-                animation: spin 1s linear infinite;
-                margin: 0 auto;
-            }
-            
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
-            .info {
-                background: #FFF3E0;
-                border-left: 4px solid #FF9800;
-                padding: 12px;
-                border-radius: 5px;
-                margin-bottom: 20px;
-                font-size: 13px;
-                color: #E65100;
-            }
-            
-            @media (max-width: 480px) {
-                .contenedor {
-                    padding: 25px;
-                }
-                
-                .encabezado h1 {
-                    font-size: 24px;
-                }
             }
         </style>
     </head>
     <body>
         <div class="contenedor">
-            <div class="encabezado">
-                <div class="emoji">🛡️</div>
-                <h1>Antianuncios iP&Droid</h1>
-                <p>Generador de Licencias</p>
-            </div>
+            <h1>🛡️ Panel Admin - Antianuncios</h1>
             
-            <div class="info">
-                ℹ️ Genera códigos de licencia para tus clientes.
-            </div>
-            
-            <form class="formulario" id="formulario">
-                <div class="grupo-input">
-                    <label for="email">📧 Email del Cliente:</label>
-                    <input type="email" id="email" name="email" placeholder="cliente@example.com" required>
-                </div>
-                
-                <div class="grupo-input">
-                    <label for="dias">📅 Duración:</label>
-                    <select id="dias" name="dias" required>
+            <div class="panel">
+                <h2>Generar Licencia</h2>
+                <div class="formulario">
+                    <input type="text" id="client_id" placeholder="CLIENT_ID del cliente">
+                    <input type="email" id="email" placeholder="Email del cliente">
+                    <select id="dias">
                         <option value="180">6 Meses (180 días)</option>
                         <option value="365">1 Año (365 días)</option>
                     </select>
+                    <button onclick="generarLicencia()">Generar Licencia</button>
                 </div>
-                
-                <button type="submit" class="btn-generar" id="btnGenerar">
-                    ⚡ GENERAR Y ENVIAR
-                </button>
-                
-                <div class="cargando-spinner" id="cargando">
-                    <div class="spinner"></div>
-                    <p style="margin-top: 10px; color: #667eea; font-size: 14px;">Generando código...</p>
+                <div class="resultado" id="resultado">
+                    <h3>✅ Licencia Generada</h3>
+                    <p>Código para el cliente:</p>
+                    <div class="codigo" id="codigo_generado"></div>
+                    <button onclick="copiarCodigo()" style="margin-top: 10px;">📋 Copiar Código</button>
                 </div>
-            </form>
+            </div>
             
-            <div class="resultado" id="resultado">
-                <div class="resultado-titulo" id="resultadoTitulo"></div>
-                <div class="resultado-mensaje" id="resultadoMensaje"></div>
+            <div class="panel">
+                <h2>Lista de Clientes</h2>
+                <table id="tabla_clientes">
+                    <thead>
+                        <tr>
+                            <th>CLIENT_ID</th>
+                            <th>Email</th>
+                            <th>Estado</th>
+                            <th>Licencia (días)</th>
+                            <th>Expira</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
             </div>
         </div>
         
         <script>
-            const formulario = document.getElementById('formulario');
-            const btnGenerar = document.getElementById('btnGenerar');
-            const cargando = document.getElementById('cargando');
-            const resultado = document.getElementById('resultado');
-            const resultadoTitulo = document.getElementById('resultadoTitulo');
-            const resultadoMensaje = document.getElementById('resultadoMensaje');
-            
-            formulario.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                
+            async function generarLicencia() {
+                const client_id = document.getElementById('client_id').value;
                 const email = document.getElementById('email').value;
                 const dias = document.getElementById('dias').value;
                 
-                btnGenerar.disabled = true;
-                btnGenerar.classList.add('cargando');
-                cargando.style.display = 'block';
-                resultado.classList.remove('activo', 'exito', 'error');
+                if (!client_id || !email) {
+                    alert('Completa todos los campos');
+                    return;
+                }
                 
                 try {
-                    const response = await fetch('/generar', {
+                    const response = await fetch('/generar-licencia', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            email: email,
-                            dias: dias
-                        })
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({client_id, email, dias})
                     });
                     
                     const data = await response.json();
                     
-                    cargando.style.display = 'none';
-                    btnGenerar.disabled = false;
-                    btnGenerar.classList.remove('cargando');
-                    
-                    resultado.classList.add('activo');
-                    
                     if (data.exito) {
-                        resultado.classList.add('exito');
-                        resultado.classList.remove('error');
-                        resultadoTitulo.innerHTML = '✅ ¡ÉXITO!';
-                        resultadoMensaje.innerHTML = `
-                            <strong>${data.mensaje}</strong>
-                            <div class="codigo-generado">${data.codigo}</div>
-                            <button type="button" class="btn-copiar" onclick="copiarCodigo('${data.codigo}')">
-                                📋 Copiar Código
-                            </button>
-                        `;
-                        
-                        formulario.reset();
+                        document.getElementById('codigo_generado').textContent = data.codigo;
+                        document.getElementById('resultado').classList.add('activo');
+                        cargarClientes();
                     } else {
-                        resultado.classList.add('error');
-                        resultado.classList.remove('exito');
-                        resultadoTitulo.innerHTML = '❌ Error';
-                        resultadoMensaje.innerHTML = data.mensaje;
+                        alert('Error: ' + data.mensaje);
                     }
-                    
                 } catch (error) {
-                    cargando.style.display = 'none';
-                    btnGenerar.disabled = false;
-                    btnGenerar.classList.remove('cargando');
-                    
-                    resultado.classList.add('activo', 'error');
-                    resultado.classList.remove('exito');
-                    resultadoTitulo.innerHTML = '❌ Error de Conexión';
-                    resultadoMensaje.innerHTML = 'No se pudo conectar al servidor.';
+                    alert('Error: ' + error);
                 }
-            });
-            
-            function copiarCodigo(codigo) {
-                navigator.clipboard.writeText(codigo).then(() => {
-                    alert('✅ Código copiado');
-                });
             }
+            
+            function copiarCodigo() {
+                const codigo = document.getElementById('codigo_generado').textContent;
+                navigator.clipboard.writeText(codigo);
+                alert('✅ Código copiado');
+            }
+            
+            async function cargarClientes() {
+                try {
+                    const response = await fetch('/lista-clientes');
+                    const data = await response.json();
+                    
+                    const tbody = document.querySelector('#tabla_clientes tbody');
+                    tbody.innerHTML = '';
+                    
+                    data.clientes.forEach(cliente => {
+                        const fila = `
+                            <tr>
+                                <td>${cliente.client_id}</td>
+                                <td>${cliente.email || '-'}</td>
+                                <td>${cliente.estado}</td>
+                                <td>${cliente.dias || '-'}</td>
+                                <td>${cliente.expiracion ? cliente.expiracion.substring(0, 10) : '-'}</td>
+                            </tr>
+                        `;
+                        tbody.innerHTML += fila;
+                    });
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+            
+            // Cargar clientes al abrir
+            cargarClientes();
+            setInterval(cargarClientes, 5000);
         </script>
     </body>
     </html>
     """
     return render_template_string(html)
-
-
-@app.route('/generar', methods=['POST'])
-def generar():
-    """Genera un código de licencia"""
-    try:
-        datos = request.get_json()
-        email = datos.get('email')
-        dias = int(datos.get('dias', 180))
-        
-        if not email or '@' not in email:
-            return jsonify({
-                'exito': False,
-                'mensaje': '❌ Email inválido'
-            })
-        
-        if dias not in [180, 365]:
-            return jsonify({
-                'exito': False,
-                'mensaje': '❌ Duración debe ser 180 o 365 días'
-            })
-        
-        codigo = generar_codigo_licencia(email, dias)
-        exito_email, mensaje_email = enviar_email(email, codigo)
-        
-        if exito_email:
-            return jsonify({
-                'exito': True,
-                'mensaje': f'✅ Enviado a {email}',
-                'codigo': codigo
-            })
-        else:
-            return jsonify({
-                'exito': False,
-                'mensaje': f'Error al enviar: {mensaje_email}'
-            })
-        
-    except Exception as e:
-        return jsonify({
-            'exito': False,
-            'mensaje': f'❌ Error: {str(e)}'
-        })
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
