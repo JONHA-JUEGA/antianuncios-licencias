@@ -22,7 +22,7 @@ app = Flask(__name__)
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
 TU_EMAIL_GMAIL = "ip.and.droid@gmail.com"  # ⭐ EDITA AQUÍ
-TU_PASSWORD_GMAIL = "tkzr vwhz bnln zzst"  # ⭐ EDITA AQUÍ (APP PASSWORD)
+TU_PASSWORD_GMAIL = "addgxvmqoywvytht"  # ⭐ EDITA AQUÍ (APP PASSWORD)
 TU_EMAIL_PAYPAL = "Ithan150395@gmail.com"  # ⭐ EDITA AQUÍ
 
 # ============================================
