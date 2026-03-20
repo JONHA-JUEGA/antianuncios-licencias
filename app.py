@@ -478,7 +478,7 @@ def panel_admin():
 
 @app.route('/')
 def index():
-    return jsonify({'mensaje': 'API Antianuncios funcionando', 'admin': '/panel-admin'})
+    return jsonify({'mensaje': 'API Antianuncios v1.1 funcionando', 'admin': '/panel-admin'})
 
 def enviar_email(email_cliente, codigo):
     """Envía el código de licencia por email"""
