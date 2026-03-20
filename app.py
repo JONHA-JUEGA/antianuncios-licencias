@@ -23,9 +23,16 @@ EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
 PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
 EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
 
+import os
+
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-CLIENTES_FILE = "/tmp/clientes.json"
-LICENCIAS_FILE = "/tmp/licencias.json"
+
+# Usar directorio persistente de Vercel
+CLIENTES_FILE = os.path.expanduser("~/.antianuncios/clientes.json")
+LICENCIAS_FILE = os.path.expanduser("~/.antianuncios/licencias.json")
+
+# Crear directorio si no existe
+os.makedirs(os.path.dirname(CLIENTES_FILE), exist_ok=True)
 
 # ============================================
 # FUNCIONES AUXILIARES
