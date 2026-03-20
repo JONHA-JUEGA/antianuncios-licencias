@@ -1,7 +1,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS - VERSIÓN VERCEL (Sin SQLite)            ║
-║  Funciona sin base de datos, datos en memoria                 ║
+║     API DE LICENCIAS - VERSIÓN VERCEL (LIMPIO)                ║
+║  Datos en memoria (persistente durante sesión)                ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
@@ -9,7 +9,6 @@ from flask import Flask, render_template_string, request, jsonify
 import hmac
 import hashlib
 from datetime import datetime, timedelta
-import json
 import os
 
 app = Flask(__name__)
@@ -18,16 +17,13 @@ app = Flask(__name__)
 # CONFIGURACIÓN
 # ============================================
 
-# Credenciales de Gmail desde variables de entorno
 EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
 PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
 EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
 
-import os
-
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
 
-# Datos en memoria (se pierden si Vercel reinicia, pero funciona)
+# Datos en memoria
 clientes_en_memoria = {}
 licencias_en_memoria = {}
 
@@ -52,32 +48,6 @@ def guardar_licencias(licencias):
     """Guarda licencias en memoria"""
     global licencias_en_memoria
     licencias_en_memoria = licencias
-
-def guardar_clientes(clientes):
-    """Guarda lista de clientes"""
-    try:
-        with open(CLIENTES_FILE, 'w') as f:
-            json.dump(clientes, f, indent=2)
-    except:
-        pass
-
-def cargar_licencias():
-    """Carga lista de licencias"""
-    try:
-        if os.path.exists(LICENCIAS_FILE):
-            with open(LICENCIAS_FILE, 'r') as f:
-                return json.load(f)
-    except:
-        pass
-    return {}
-
-def guardar_licencias(licencias):
-    """Guarda lista de licencias"""
-    try:
-        with open(LICENCIAS_FILE, 'w') as f:
-            json.dump(licencias, f, indent=2)
-    except:
-        pass
 
 # ============================================
 # FUNCIONES DE LICENCIAS
@@ -105,7 +75,6 @@ def validar_codigo_licencia(codigo):
         client_id, email, dias_str, firma_proporcionada = partes
         dias = int(dias_str)
         
-        # Recalcular firma esperada
         mensaje = f"{client_id}|{email}|{dias}"
         firma_esperada = hmac.new(
             CLAVE_SECRETA.encode(),
@@ -120,6 +89,51 @@ def validar_codigo_licencia(codigo):
     except:
         return False, "Error al validar"
 
+def enviar_email(email_cliente, codigo):
+    """Envía el código de licencia por email"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
+        
+        cuerpo_html = f"""
+        <html>
+            <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
+                    <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
+                    <h2 style="text-align: center;">¡Licencia Activada!</h2>
+                    <p>Tu código de licencia:</p>
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
+                        {codigo}
+                    </div>
+                    <p style="margin-top: 20px; color: #666;">
+                        Copia este código y regístralo en la app Antianuncios iP&Droid.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+        
+        mensaje = MIMEMultipart()
+        mensaje['From'] = EMAIL_GMAIL
+        mensaje['To'] = email_cliente
+        mensaje['Subject'] = asunto
+        
+        mensaje.attach(MIMEText(cuerpo_html, 'html'))
+        
+        servidor = smtplib.SMTP('smtp.gmail.com', 587)
+        servidor.starttls()
+        servidor.login(EMAIL_GMAIL, PASSWORD_GMAIL)
+        servidor.send_message(mensaje)
+        servidor.quit()
+        
+        return True
+    except Exception as e:
+        print(f"Error enviando email: {e}")
+        return False
+
 # ============================================
 # RUTAS API
 # ============================================
@@ -130,22 +144,26 @@ def registrar_cliente():
     try:
         datos = request.get_json()
         client_id = datos.get('client_id')
+        email = datos.get('email', '')
         
         if not client_id:
             return jsonify({'exito': False, 'mensaje': 'ID vacío'})
         
         clientes = cargar_clientes()
         
-        # Verificar si ya existe
+        # Si ya existe, actualizar email si viene
         if client_id in clientes:
-            return jsonify({'exito': True, 'mensaje': 'Cliente ya registrado'})
+            if email:
+                clientes[client_id]['email'] = email
+                guardar_clientes(clientes)
+            return jsonify({'exito': True, 'mensaje': 'Cliente actualizado'})
         
-        # Insertar nuevo cliente
+        # Crear nuevo cliente
         clientes[client_id] = {
-    'fecha_registro': datetime.now().isoformat(),
-    'email': datos.get('email'),  # ← Ahora recibe el email
-    'estado': 'pendiente'
-}
+            'fecha_registro': datetime.now().isoformat(),
+            'email': email,
+            'estado': 'pendiente'
+        }
         
         guardar_clientes(clientes)
         
@@ -168,10 +186,8 @@ def generar_licencia():
         if dias not in [180, 365]:
             return jsonify({'exito': False, 'mensaje': 'Días inválidos'})
         
-        # Generar código
         codigo = generar_codigo_licencia(client_id, email, dias)
         
-        # Guardar licencia
         licencias = cargar_licencias()
         fecha_expiracion = (datetime.now() + timedelta(days=dias)).isoformat()
         
@@ -185,18 +201,9 @@ def generar_licencia():
         }
         
         guardar_licencias(licencias)
-
-        # Enviar email con el código
-        try:
-            enviar_email(email, codigo)
-        except:
-            pass
-
-        # Enviar email con el código
-        try:
-            enviar_email(email, codigo)
-        except:
-            pass
+        
+        # Enviar email al cliente
+        enviar_email(email, codigo)
         
         # Actualizar cliente
         clientes = cargar_clientes()
@@ -220,7 +227,6 @@ def validar_licencia():
         datos = request.get_json()
         codigo = datos.get('codigo')
         
-        # Validar formato
         valido, resultado = validar_codigo_licencia(codigo)
         if not valido:
             return jsonify({'exito': False, 'mensaje': resultado})
@@ -237,7 +243,6 @@ def validar_licencia():
         if not licencia.get('activa'):
             return jsonify({'exito': False, 'mensaje': 'Licencia desactivada'})
         
-        # Verificar expiración
         fecha_expiracion = datetime.fromisoformat(licencia['fecha_expiracion'])
         if datetime.now() > fecha_expiracion:
             return jsonify({'exito': False, 'mensaje': 'Licencia expirada'})
@@ -490,95 +495,7 @@ def panel_admin():
 
 @app.route('/')
 def index():
-    return jsonify({'mensaje': 'API Antianuncios v1.2 funcionando', 'admin': '/panel-admin'})
-
-def enviar_email(email_cliente, codigo):
-    """Envía el código de licencia por email"""
-    try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
-        
-        cuerpo_html = f"""
-        <html>
-            <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
-                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
-                    <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
-                    <h2 style="text-align: center;">¡Licencia Activada!</h2>
-                    <p>Tu código de licencia:</p>
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
-                        {codigo}
-                    </div>
-                    <p style="margin-top: 20px; color: #666;">
-                        Copia este código y regístralo en la app Antianuncios iP&Droid.
-                    </p>
-                </div>
-            </body>
-        </html>
-        """
-        
-        mensaje = MIMEMultipart()
-        mensaje['From'] = EMAIL_GMAIL
-        mensaje['To'] = email_cliente
-        mensaje['Subject'] = asunto
-        
-        mensaje.attach(MIMEText(cuerpo_html, 'html'))
-        
-        servidor = smtplib.SMTP('smtp.gmail.com', 587)
-        servidor.starttls()
-        servidor.login(EMAIL_GMAIL, PASSWORD_GMAIL)
-        servidor.send_message(mensaje)
-        servidor.quit()
-        
-        return True
-    except Exception as e:
-        return False
-
-def enviar_email(email_cliente, codigo):
-    """Envía el código de licencia por email"""
-    try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
-        
-        cuerpo_html = f"""
-        <html>
-            <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
-                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
-                    <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
-                    <h2 style="text-align: center;">¡Licencia Activada!</h2>
-                    <p>Tu código de licencia:</p>
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
-                        {codigo}
-                    </div>
-                    <p style="margin-top: 20px; color: #666;">
-                        Copia este código y regístralo en la app Antianuncios iP&Droid.
-                    </p>
-                </div>
-            </body>
-        </html>
-        """
-        
-        mensaje = MIMEMultipart()
-        mensaje['From'] = EMAIL_GMAIL
-        mensaje['To'] = email_cliente
-        mensaje['Subject'] = asunto
-        
-        mensaje.attach(MIMEText(cuerpo_html, 'html'))
-        
-        servidor = smtplib.SMTP('smtp.gmail.com', 587)
-        servidor.starttls()
-        servidor.login(EMAIL_GMAIL, PASSWORD_GMAIL)
-        servidor.send_message(mensaje)
-        servidor.quit()
-        
-        return True
-    except Exception as e:
-        return False
+    return jsonify({'mensaje': 'API Antianuncios funcionando', 'admin': '/panel-admin'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
