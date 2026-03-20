@@ -27,12 +27,9 @@ import os
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
 
-# Usar directorio persistente de Vercel
-CLIENTES_FILE = os.path.expanduser("~/.antianuncios/clientes.json")
-LICENCIAS_FILE = os.path.expanduser("~/.antianuncios/licencias.json")
-
-# Crear directorio si no existe
-os.makedirs(os.path.dirname(CLIENTES_FILE), exist_ok=True)
+# Datos en memoria (se pierden si Vercel reinicia, pero funciona)
+clientes_en_memoria = {}
+licencias_en_memoria = {}
 
 # ============================================
 # FUNCIONES AUXILIARES
