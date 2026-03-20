@@ -179,6 +179,12 @@ def generar_licencia():
             enviar_email(email, codigo)
         except:
             pass
+
+        # Enviar email con el código
+        try:
+            enviar_email(email, codigo)
+        except:
+            pass
         
         # Actualizar cliente
         clientes = cargar_clientes()
@@ -473,6 +479,50 @@ def panel_admin():
 @app.route('/')
 def index():
     return jsonify({'mensaje': 'API Antianuncios funcionando', 'admin': '/panel-admin'})
+
+def enviar_email(email_cliente, codigo):
+    """Envía el código de licencia por email"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
+        
+        cuerpo_html = f"""
+        <html>
+            <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
+                    <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
+                    <h2 style="text-align: center;">¡Licencia Activada!</h2>
+                    <p>Tu código de licencia:</p>
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
+                        {codigo}
+                    </div>
+                    <p style="margin-top: 20px; color: #666;">
+                        Copia este código y regístralo en la app Antianuncios iP&Droid.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+        
+        mensaje = MIMEMultipart()
+        mensaje['From'] = EMAIL_GMAIL
+        mensaje['To'] = email_cliente
+        mensaje['Subject'] = asunto
+        
+        mensaje.attach(MIMEText(cuerpo_html, 'html'))
+        
+        servidor = smtplib.SMTP('smtp.gmail.com', 587)
+        servidor.starttls()
+        servidor.login(EMAIL_GMAIL, PASSWORD_GMAIL)
+        servidor.send_message(mensaje)
+        servidor.quit()
+        
+        return True
+    except Exception as e:
+        return False
 
 def enviar_email(email_cliente, codigo):
     """Envía el código de licencia por email"""
