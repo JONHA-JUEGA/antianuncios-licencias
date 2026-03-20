@@ -36,14 +36,22 @@ licencias_en_memoria = {}
 # ============================================
 
 def cargar_clientes():
-    """Carga lista de clientes"""
-    try:
-        if os.path.exists(CLIENTES_FILE):
-            with open(CLIENTES_FILE, 'r') as f:
-                return json.load(f)
-    except:
-        pass
-    return {}
+    """Carga clientes de memoria"""
+    return clientes_en_memoria
+
+def guardar_clientes(clientes):
+    """Guarda clientes en memoria"""
+    global clientes_en_memoria
+    clientes_en_memoria = clientes
+
+def cargar_licencias():
+    """Carga licencias de memoria"""
+    return licencias_en_memoria
+
+def guardar_licencias(licencias):
+    """Guarda licencias en memoria"""
+    global licencias_en_memoria
+    licencias_en_memoria = licencias
 
 def guardar_clientes(clientes):
     """Guarda lista de clientes"""
