@@ -130,10 +130,10 @@ def registrar_cliente():
         
         # Insertar nuevo cliente
         clientes[client_id] = {
-            'fecha_registro': datetime.now().isoformat(),
-            'email': None,
-            'estado': 'pendiente'
-        }
+    'fecha_registro': datetime.now().isoformat(),
+    'email': datos.get('email'),  # ← Ahora recibe el email
+    'estado': 'pendiente'
+}
         
         guardar_clientes(clientes)
         
