@@ -1,6 +1,6 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS - VERSIÓN VERCEL (LIMPIO)                ║
+║     API DE LICENCIAS - VERSIÓN VERCEL (CON ILIMITADA)         ║
 ║  Datos en memoria (persistente durante sesión)                ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
@@ -65,8 +65,21 @@ def generar_codigo_licencia(client_id, email, dias=180):
     codigo = f"{client_id}|{email}|{dias}|{firma}"
     return codigo
 
+def generar_codigo_ilimitado(client_id, email):
+    """Genera código de licencia ILIMITADA"""
+    dias = 99999  # Valor especial para ilimitada
+    mensaje = f"{client_id}|{email}|{dias}"
+    firma = hmac.new(
+        CLAVE_SECRETA.encode(),
+        mensaje.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    codigo = f"{client_id}|{email}|{dias}|{firma}"
+    return codigo
+
 def validar_codigo_licencia(codigo):
-    """Valida un código de licencia"""
+    """Valida un código de licencia (incluyendo ilimitadas)"""
     try:
         partes = codigo.split("|")
         if len(partes) != 4:
@@ -85,11 +98,15 @@ def validar_codigo_licencia(codigo):
         if firma_proporcionada != firma_esperada:
             return False, "Firma inválida"
         
+        # Acepta: 180, 365, 99999 (ilimitada)
+        if dias not in [180, 365, 99999]:
+            return False, "Días inválidos"
+        
         return True, (client_id, email, dias)
     except:
         return False, "Error al validar"
 
-def enviar_email(email_cliente, codigo):
+def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
     """Envía el código de licencia por email"""
     try:
         import smtplib
@@ -98,12 +115,20 @@ def enviar_email(email_cliente, codigo):
         
         asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
         
+        if tipo_licencia == "ilimitada":
+            duracion_texto = "ILIMITADA (SIN EXPIRACIÓN)"
+        elif tipo_licencia == "1año":
+            duracion_texto = "1 AÑO (365 días)"
+        else:
+            duracion_texto = "6 MESES (180 días)"
+        
         cuerpo_html = f"""
         <html>
             <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
                 <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
                     <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
                     <h2 style="text-align: center;">¡Licencia Activada!</h2>
+                    <p><strong>Duración:</strong> {duracion_texto}</p>
                     <p>Tu código de licencia:</p>
                     <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
                         {codigo}
@@ -178,18 +203,26 @@ def generar_licencia():
         datos = request.get_json()
         client_id = datos.get('client_id')
         email = datos.get('email')
-        dias = int(datos.get('dias', 180))
+        tipo = datos.get('tipo', 'normal')  # 'normal', '1año', 'ilimitada'
         
         if not client_id or not email:
             return jsonify({'exito': False, 'mensaje': 'Datos incompletos'})
         
-        if dias not in [180, 365]:
-            return jsonify({'exito': False, 'mensaje': 'Días inválidos'})
-        
-        codigo = generar_codigo_licencia(client_id, email, dias)
+        # Generar código según tipo
+        if tipo == 'ilimitada':
+            codigo = generar_codigo_ilimitado(client_id, email)
+            dias = 99999
+            fecha_expiracion = "ILIMITADA"
+        elif tipo == '1año':
+            codigo = generar_codigo_licencia(client_id, email, 365)
+            dias = 365
+            fecha_expiracion = (datetime.now() + timedelta(days=365)).isoformat()
+        else:  # normal (6 meses)
+            codigo = generar_codigo_licencia(client_id, email, 180)
+            dias = 180
+            fecha_expiracion = (datetime.now() + timedelta(days=180)).isoformat()
         
         licencias = cargar_licencias()
-        fecha_expiracion = (datetime.now() + timedelta(days=dias)).isoformat()
         
         licencias[client_id] = {
             'email': email,
@@ -197,13 +230,14 @@ def generar_licencia():
             'fecha_compra': datetime.now().isoformat(),
             'dias': dias,
             'fecha_expiracion': fecha_expiracion,
+            'tipo': tipo,
             'activa': True
         }
         
         guardar_licencias(licencias)
         
         # Enviar email al cliente
-        enviar_email(email, codigo)
+        enviar_email(email, codigo, tipo)
         
         # Actualizar cliente
         clientes = cargar_clientes()
@@ -215,7 +249,8 @@ def generar_licencia():
         return jsonify({
             'exito': True,
             'mensaje': 'Licencia generada',
-            'codigo': codigo
+            'codigo': codigo,
+            'tipo': tipo
         })
     except Exception as e:
         return jsonify({'exito': False, 'mensaje': str(e)})
@@ -242,6 +277,14 @@ def validar_licencia():
         
         if not licencia.get('activa'):
             return jsonify({'exito': False, 'mensaje': 'Licencia desactivada'})
+        
+        # Si es ilimitada (99999), no expira
+        if dias == 99999:
+            return jsonify({
+                'exito': True,
+                'mensaje': 'Licencia válida (ILIMITADA)',
+                'dias_restantes': 99999
+            })
         
         fecha_expiracion = datetime.fromisoformat(licencia['fecha_expiracion'])
         if datetime.now() > fecha_expiracion:
@@ -273,6 +316,7 @@ def lista_clientes():
                 'estado': cliente.get('estado'),
                 'fecha_registro': cliente.get('fecha_registro'),
                 'dias': lic.get('dias'),
+                'tipo': lic.get('tipo', 'ninguna'),
                 'expiracion': lic.get('fecha_expiracion')
             })
         
@@ -342,6 +386,12 @@ def panel_admin():
             button:hover {
                 background: #45a049;
             }
+            button.ilimitada {
+                background: #FF9800;
+            }
+            button.ilimitada:hover {
+                background: #F57C00;
+            }
             table {
                 width: 100%;
                 border-collapse: collapse;
@@ -371,6 +421,10 @@ def panel_admin():
             .resultado.activo {
                 display: block;
             }
+            .resultado.ilimitada {
+                background: #FFF3E0;
+                border-left-color: #FF9800;
+            }
             .codigo {
                 background: #f0f0f0;
                 padding: 10px;
@@ -379,6 +433,21 @@ def panel_admin():
                 font-family: monospace;
                 font-size: 12px;
                 margin-top: 10px;
+            }
+            .badge {
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            .badge.ilimitada {
+                background: #FF9800;
+                color: white;
+            }
+            .badge.normal {
+                background: #4CAF50;
+                color: white;
             }
         </style>
     </head>
@@ -391,14 +460,17 @@ def panel_admin():
                 <div class="formulario">
                     <input type="text" id="client_id" placeholder="CLIENT_ID del cliente">
                     <input type="email" id="email" placeholder="Email del cliente">
-                    <select id="dias">
-                        <option value="180">6 Meses (180 días)</option>
-                        <option value="365">1 Año (365 días)</option>
+                    <select id="tipo">
+                        <option value="normal">6 Meses (180 días) - $100 MXN</option>
+                        <option value="1año">1 Año (365 días) - $200 MXN</option>
+                        <option value="ilimitada">ILIMITADA - SIN EXPIRACIÓN ⭐</option>
                     </select>
-                    <button onclick="generarLicencia()">Generar Licencia</button>
+                    <button onclick="generarLicencia()">Generar Licencia Normal</button>
+                    <button class="ilimitada" onclick="generarLicenciaIlimitada()">🔓 Generar ILIMITADA</button>
                 </div>
                 <div class="resultado" id="resultado">
                     <h3>✅ Licencia Generada</h3>
+                    <p id="tipo_licencia_texto"></p>
                     <p>Código para el cliente:</p>
                     <div class="codigo" id="codigo_generado"></div>
                     <button onclick="copiarCodigo()" style="margin-top: 10px;">📋 Copiar Código</button>
@@ -413,6 +485,7 @@ def panel_admin():
                             <th>CLIENT_ID</th>
                             <th>Email</th>
                             <th>Estado</th>
+                            <th>Tipo</th>
                             <th>Licencia (días)</th>
                             <th>Expira</th>
                         </tr>
@@ -423,28 +496,67 @@ def panel_admin():
         </div>
         
         <script>
+            function setTipoTexto(tipo) {
+                const elemento = document.getElementById('tipo_licencia_texto');
+                if (tipo === 'ilimitada') {
+                    elemento.textContent = '🔓 Tipo: LICENCIA ILIMITADA (SIN EXPIRACIÓN)';
+                    elemento.style.color = '#FF9800';
+                    elemento.style.fontWeight = 'bold';
+                } else if (tipo === '1año') {
+                    elemento.textContent = '✅ Tipo: 1 AÑO (365 días)';
+                } else {
+                    elemento.textContent = '✅ Tipo: 6 MESES (180 días)';
+                }
+            }
+            
             async function generarLicencia() {
                 const client_id = document.getElementById('client_id').value;
                 const email = document.getElementById('email').value;
-                const dias = document.getElementById('dias').value;
+                const tipo = document.getElementById('tipo').value;
                 
                 if (!client_id || !email) {
                     alert('Completa todos los campos');
                     return;
                 }
                 
+                await enviarGenerarLicencia(client_id, email, tipo);
+            }
+            
+            async function generarLicenciaIlimitada() {
+                const client_id = document.getElementById('client_id').value;
+                const email = document.getElementById('email').value;
+                
+                if (!client_id || !email) {
+                    alert('Completa CLIENT_ID y Email');
+                    return;
+                }
+                
+                await enviarGenerarLicencia(client_id, email, 'ilimitada');
+            }
+            
+            async function enviarGenerarLicencia(client_id, email, tipo) {
                 try {
                     const response = await fetch('/generar-licencia', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({client_id, email, dias})
+                        body: JSON.stringify({client_id, email, tipo})
                     });
                     
                     const data = await response.json();
                     
                     if (data.exito) {
                         document.getElementById('codigo_generado').textContent = data.codigo;
-                        document.getElementById('resultado').classList.add('activo');
+                        setTipoTexto(tipo);
+                        
+                        const resultado = document.getElementById('resultado');
+                        resultado.classList.add('activo');
+                        
+                        if (tipo === 'ilimitada') {
+                            resultado.classList.add('ilimitada');
+                        } else {
+                            resultado.classList.remove('ilimitada');
+                        }
+                        
                         cargarClientes();
                     } else {
                         alert('Error: ' + data.mensaje);
@@ -469,13 +581,21 @@ def panel_admin():
                     tbody.innerHTML = '';
                     
                     data.clientes.forEach(cliente => {
+                        let badge = '';
+                        if (cliente.tipo === 'ilimitada') {
+                            badge = '<span class="badge ilimitada">⭐ ILIMITADA</span>';
+                        } else if (cliente.tipo !== 'ninguna') {
+                            badge = '<span class="badge normal">' + cliente.tipo + '</span>';
+                        }
+                        
                         const fila = `
                             <tr>
                                 <td>${cliente.client_id}</td>
                                 <td>${cliente.email || '-'}</td>
                                 <td>${cliente.estado}</td>
+                                <td>${badge}</td>
                                 <td>${cliente.dias || '-'}</td>
-                                <td>${cliente.expiracion ? cliente.expiracion.substring(0, 10) : '-'}</td>
+                                <td>${cliente.expiracion && cliente.expiracion !== 'ILIMITADA' ? cliente.expiracion.substring(0, 10) : (cliente.expiracion === 'ILIMITADA' ? '∞' : '-')}</td>
                             </tr>
                         `;
                         tbody.innerHTML += fila;
