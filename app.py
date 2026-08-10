@@ -1,7 +1,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS - VERSIÓN VERCEL (CON RESEND Y ILIMITADA) ║
-║   Datos en memoria (persistente durante sesión)               ║
+║     API DE LICENCIAS ANTIANUNCIOS - VERSIÓN UNIFICADA VERCEL  ║
+║         Panel Admin + Registro CLIENT_ID + Resend API          ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
@@ -10,7 +10,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta
 import os
-import resend  # Nueva librería para envíos rápidos por API
+import resend
 
 app = Flask(__name__)
 
@@ -18,14 +18,11 @@ app = Flask(__name__)
 # CONFIGURACIÓN
 # ============================================
 
-EMAIL_GMAIL = os.environ.get('EMAIL_GMAIL', 'ip.and.droid@gmail.com')
-PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
-EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
+CLAVE_SECRETA = os.environ.get("CLAVE_SECRETA", "antianuncios_ipdroid_2024")
+TU_EMAIL_PAYPAL = os.environ.get("PAYPAL_EMAIL", "Ithan150395@gmail.com")
 
-CLAVE_SECRETA = "antianuncios_ipdroid_2024"
-
-# Clave de API de Resend cargada desde las variables de entorno de Vercel
-resend.api_key = os.environ.get('RESEND_API_KEY')
+# Cargar API Key de Resend desde variables de entorno
+resend.api_key = os.environ.get("RESEND_API_KEY")
 
 # Datos en memoria
 clientes_en_memoria = {}
@@ -36,54 +33,35 @@ licencias_en_memoria = {}
 # ============================================
 
 def cargar_clientes():
-    """Carga clientes de memoria"""
     return clientes_en_memoria
 
 def guardar_clientes(clientes):
-    """Guarda clientes en memoria"""
     global clientes_en_memoria
     clientes_en_memoria = clientes
 
 def cargar_licencias():
-    """Carga licencias de memoria"""
     return licencias_en_memoria
 
 def guardar_licencias(licencias):
-    """Guarda licencias en memoria"""
     global licencias_en_memoria
     licencias_en_memoria = licencias
 
 # ============================================
-# FUNCIONES DE LICENCIAS
+# FUNCIONES DE LICENCIAS Y ENVÍO DE EMAIL
 # ============================================
 
 def generar_codigo_licencia(client_id, email, dias=180):
-    """Genera código de licencia único"""
     mensaje = f"{client_id}|{email}|{dias}"
-    firma = hmac.new(
-        CLAVE_SECRETA.encode(),
-        mensaje.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    codigo = f"{client_id}|{email}|{dias}|{firma}"
-    return codigo
+    firma = hmac.new(CLAVE_SECRETA.encode(), mensaje.encode(), hashlib.sha256).hexdigest()
+    return f"{client_id}|{email}|{dias}|{firma}"
 
 def generar_codigo_ilimitado(client_id, email):
-    """Genera código de licencia ILIMITADA"""
-    dias = 99999  # Valor especial para ilimitada
+    dias = 99999
     mensaje = f"{client_id}|{email}|{dias}"
-    firma = hmac.new(
-        CLAVE_SECRETA.encode(),
-        mensaje.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    codigo = f"{client_id}|{email}|{dias}|{firma}"
-    return codigo
+    firma = hmac.new(CLAVE_SECRETA.encode(), mensaje.encode(), hashlib.sha256).hexdigest()
+    return f"{client_id}|{email}|{dias}|{firma}"
 
 def validar_codigo_licencia(codigo):
-    """Valida un código de licencia (incluyendo ilimitadas)"""
     try:
         partes = codigo.split("|")
         if len(partes) != 4:
@@ -93,16 +71,11 @@ def validar_codigo_licencia(codigo):
         dias = int(dias_str)
         
         mensaje = f"{client_id}|{email}|{dias}"
-        firma_esperada = hmac.new(
-            CLAVE_SECRETA.encode(),
-            mensaje.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        firma_esperada = hmac.new(CLAVE_SECRETA.encode(), mensaje.encode(), hashlib.sha256).hexdigest()
         
         if firma_proporcionada != firma_esperada:
             return False, "Firma inválida"
         
-        # Acepta: 180, 365, 99999 (ilimitada)
         if dias not in [180, 365, 99999]:
             return False, "Días inválidos"
         
@@ -111,11 +84,11 @@ def validar_codigo_licencia(codigo):
         return False, "Error al validar"
 
 def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
-    """Envía el código de licencia por email usando la API de Resend"""
+    """Envía el correo a través de Resend API (Inmune a bloqueos SMTP de Vercel)"""
     try:
         if not resend.api_key:
-            print("Error: Falta la variable RESEND_API_KEY en Vercel")
-            return False
+            print("❌ Error: RESEND_API_KEY no está configurada en Vercel.")
+            return False, "Falta RESEND_API_KEY"
 
         asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
         
@@ -128,24 +101,26 @@ def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
         
         cuerpo_html = f"""
         <html>
-            <body style="font-family: Arial; background-color: #f5f5f5; padding: 20px;">
+            <body style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
                 <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
                     <h1 style="color: #4CAF50; text-align: center;">🛡️ Antianuncios iP&Droid</h1>
                     <h2 style="text-align: center;">¡Licencia Activada!</h2>
                     <p><strong>Duración:</strong> {duracion_texto}</p>
                     <p>Tu código de licencia:</p>
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px;">
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 13px; font-weight: bold;">
                         {codigo}
                     </div>
                     <p style="margin-top: 20px; color: #666;">
                         Copia este código y regístralo en la app Antianuncios iP&Droid.
+                    </p>
+                    <p style="color: #999; font-size: 12px; text-align: center; margin-top: 30px;">
+                        Contacto de soporte: {TU_EMAIL_PAYPAL}
                     </p>
                 </div>
             </body>
         </html>
         """
         
-        # Parámetros para enviar correo vía HTTP API
         params = {
             "from": "Antianuncios iP&Droid <onboarding@resend.dev>",
             "to": [email_cliente],
@@ -154,10 +129,10 @@ def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
         }
         
         resend.Emails.send(params)
-        return True
+        return True, "Enviado con éxito"
     except Exception as e:
-        print(f"Error enviando email con Resend: {e}")
-        return False
+        print(f"❌ Error enviando email vía Resend: {e}")
+        return False, str(e)
 
 # ============================================
 # RUTAS API
@@ -165,7 +140,6 @@ def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
 
 @app.route('/registrar-cliente', methods=['POST'])
 def registrar_cliente():
-    """Recibe el ID del cliente cuando abre la app"""
     try:
         datos = request.get_json()
         client_id = datos.get('client_id')
@@ -175,40 +149,33 @@ def registrar_cliente():
             return jsonify({'exito': False, 'mensaje': 'ID vacío'})
         
         clientes = cargar_clientes()
-        
-        # Si ya existe, actualizar email si viene
         if client_id in clientes:
             if email:
                 clientes[client_id]['email'] = email
                 guardar_clientes(clientes)
             return jsonify({'exito': True, 'mensaje': 'Cliente actualizado'})
         
-        # Crear nuevo cliente
         clientes[client_id] = {
             'fecha_registro': datetime.now().isoformat(),
             'email': email,
             'estado': 'pendiente'
         }
-        
         guardar_clientes(clientes)
-        
         return jsonify({'exito': True, 'mensaje': 'Cliente registrado'})
     except Exception as e:
         return jsonify({'exito': False, 'mensaje': str(e)})
 
 @app.route('/generar-licencia', methods=['POST'])
 def generar_licencia():
-    """Genera una licencia para un cliente (ADMIN)"""
     try:
         datos = request.get_json()
         client_id = datos.get('client_id')
         email = datos.get('email')
-        tipo = datos.get('tipo', 'normal')  # 'normal', '1año', 'ilimitada'
+        tipo = datos.get('tipo', 'normal')
         
         if not client_id or not email:
             return jsonify({'exito': False, 'mensaje': 'Datos incompletos'})
         
-        # Generar código según tipo
         if tipo == 'ilimitada':
             codigo = generar_codigo_ilimitado(client_id, email)
             dias = 99999
@@ -217,13 +184,12 @@ def generar_licencia():
             codigo = generar_codigo_licencia(client_id, email, 365)
             dias = 365
             fecha_expiracion = (datetime.now() + timedelta(days=365)).isoformat()
-        else:  # normal (6 meses)
+        else:
             codigo = generar_codigo_licencia(client_id, email, 180)
             dias = 180
             fecha_expiracion = (datetime.now() + timedelta(days=180)).isoformat()
         
         licencias = cargar_licencias()
-        
         licencias[client_id] = {
             'email': email,
             'codigo': codigo,
@@ -233,13 +199,11 @@ def generar_licencia():
             'tipo': tipo,
             'activa': True
         }
-        
         guardar_licencias(licencias)
         
-        # Enviar email al cliente vía Resend API
-        enviar_email(email, codigo, tipo)
+        # Envío de correo mediante API HTTP
+        exito_mail, msg_mail = enviar_email(email, codigo, tipo)
         
-        # Actualizar cliente
         clientes = cargar_clientes()
         if client_id in clientes:
             clientes[client_id]['email'] = email
@@ -248,7 +212,7 @@ def generar_licencia():
         
         return jsonify({
             'exito': True,
-            'mensaje': 'Licencia generada',
+            'mensaje': f'Licencia generada. Email: {msg_mail}',
             'codigo': codigo,
             'tipo': tipo
         })
@@ -257,56 +221,40 @@ def generar_licencia():
 
 @app.route('/validar-licencia', methods=['POST'])
 def validar_licencia():
-    """Valida una licencia desde main.exe"""
     try:
         datos = request.get_json()
         codigo = datos.get('codigo')
-        
         valido, resultado = validar_codigo_licencia(codigo)
         if not valido:
             return jsonify({'exito': False, 'mensaje': resultado})
         
         client_id, email, dias = resultado
-        
         licencias = cargar_licencias()
         
         if client_id not in licencias:
             return jsonify({'exito': False, 'mensaje': 'Licencia no encontrada'})
         
         licencia = licencias[client_id]
-        
         if not licencia.get('activa'):
             return jsonify({'exito': False, 'mensaje': 'Licencia desactivada'})
         
-        # Si es ilimitada (99999), no expira
         if dias == 99999:
-            return jsonify({
-                'exito': True,
-                'mensaje': 'Licencia válida (ILIMITADA)',
-                'dias_restantes': 99999
-            })
+            return jsonify({'exito': True, 'mensaje': 'Licencia válida (ILIMITADA)', 'dias_restantes': 99999})
         
         fecha_expiracion = datetime.fromisoformat(licencia['fecha_expiracion'])
         if datetime.now() > fecha_expiracion:
             return jsonify({'exito': False, 'mensaje': 'Licencia expirada'})
         
         dias_restantes = (fecha_expiracion - datetime.now()).days
-        
-        return jsonify({
-            'exito': True,
-            'mensaje': 'Licencia válida',
-            'dias_restantes': dias_restantes
-        })
+        return jsonify({'exito': True, 'mensaje': 'Licencia válida', 'dias_restantes': dias_restantes})
     except Exception as e:
         return jsonify({'exito': False, 'mensaje': str(e)})
 
 @app.route('/lista-clientes', methods=['GET'])
 def lista_clientes():
-    """Lista todos los clientes (ADMIN)"""
     try:
         clientes = cargar_clientes()
         licencias = cargar_licencias()
-        
         resultado = []
         for client_id, cliente in clientes.items():
             lic = licencias.get(client_id, {})
@@ -319,14 +267,12 @@ def lista_clientes():
                 'tipo': lic.get('tipo', 'ninguna'),
                 'expiracion': lic.get('fecha_expiracion')
             })
-        
         return jsonify({'clientes': resultado})
     except Exception as e:
         return jsonify({'error': str(e)})
 
 @app.route('/panel-admin')
 def panel_admin():
-    """Panel admin para generar licencias"""
     html = """
     <!DOCTYPE html>
     <html lang="es">
@@ -336,125 +282,25 @@ def panel_admin():
         <title>Panel Admin - Antianuncios</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: #f5f5f5;
-                padding: 20px;
-            }
-            .contenedor {
-                max-width: 1200px;
-                margin: 0 auto;
-            }
-            h1 {
-                color: #333;
-                margin-bottom: 30px;
-                text-align: center;
-            }
-            .panel {
-                background: white;
-                border-radius: 10px;
-                padding: 20px;
-                margin-bottom: 20px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            .formulario {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            input, select {
-                padding: 10px;
-                border: 2px solid #ddd;
-                border-radius: 5px;
-                font-size: 14px;
-            }
-            input:focus, select:focus {
-                outline: none;
-                border-color: #4CAF50;
-            }
-            button {
-                background: #4CAF50;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-                font-weight: bold;
-                grid-column: 1 / -1;
-            }
-            button:hover {
-                background: #45a049;
-            }
-            button.ilimitada {
-                background: #FF9800;
-            }
-            button.ilimitada:hover {
-                background: #F57C00;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-            }
-            table th {
-                background: #4CAF50;
-                color: white;
-                padding: 12px;
-                text-align: left;
-            }
-            table td {
-                padding: 12px;
-                border-bottom: 1px solid #ddd;
-            }
-            table tr:hover {
-                background: #f9f9f9;
-            }
-            .resultado {
-                background: #E8F5E9;
-                border-left: 4px solid #4CAF50;
-                padding: 15px;
-                margin-top: 15px;
-                border-radius: 5px;
-                display: none;
-            }
-            .resultado.activo {
-                display: block;
-            }
-            .resultado.ilimitada {
-                background: #FFF3E0;
-                border-left-color: #FF9800;
-            }
-            .codigo {
-                background: #f0f0f0;
-                padding: 10px;
-                border-radius: 5px;
-                word-break: break-all;
-                font-family: monospace;
-                font-size: 12px;
-                margin-top: 10px;
-            }
-            .badge {
-                display: inline-block;
-                padding: 4px 8px;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            .badge.ilimitada {
-                background: #FF9800;
-                color: white;
-            }
-            .badge.normal {
-                background: #4CAF50;
-                color: white;
-            }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
+            .contenedor { max-width: 1200px; margin: 0 auto; }
+            h1 { color: #333; margin-bottom: 30px; text-align: center; }
+            .panel { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .formulario { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+            input, select { padding: 10px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px; }
+            button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; grid-column: 1 / -1; }
+            button.ilimitada { background: #FF9800; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            table th { background: #4CAF50; color: white; padding: 12px; text-align: left; }
+            table td { padding: 12px; border-bottom: 1px solid #ddd; }
+            .resultado { background: #E8F5E9; border-left: 4px solid #4CAF50; padding: 15px; margin-top: 15px; border-radius: 5px; display: none; }
+            .resultado.activo { display: block; }
+            .codigo { background: #f0f0f0; padding: 10px; border-radius: 5px; word-break: break-all; font-family: monospace; font-size: 12px; margin-top: 10px; }
         </style>
     </head>
     <body>
         <div class="contenedor">
             <h1>🛡️ Panel Admin - Antianuncios</h1>
-            
             <div class="panel">
                 <h2>Generar Licencia</h2>
                 <div class="formulario">
@@ -471,7 +317,6 @@ def panel_admin():
                 <div class="resultado" id="resultado">
                     <h3>✅ Licencia Generada</h3>
                     <p id="tipo_licencia_texto"></p>
-                    <p>Código para el cliente:</p>
                     <div class="codigo" id="codigo_generado"></div>
                     <button onclick="copiarCodigo()" style="margin-top: 10px;">📋 Copiar Código</button>
                 </div>
@@ -496,41 +341,18 @@ def panel_admin():
         </div>
         
         <script>
-            function setTipoTexto(tipo) {
-                const elemento = document.getElementById('tipo_licencia_texto');
-                if (tipo === 'ilimitada') {
-                    elemento.textContent = '🔓 Tipo: LICENCIA ILIMITADA (SIN EXPIRACIÓN)';
-                    elemento.style.color = '#FF9800';
-                    elemento.style.fontWeight = 'bold';
-                } else if (tipo === '1año') {
-                    elemento.textContent = '✅ Tipo: 1 AÑO (365 días)';
-                } else {
-                    elemento.textContent = '✅ Tipo: 6 MESES (180 días)';
-                }
-            }
-            
             async function generarLicencia() {
                 const client_id = document.getElementById('client_id').value;
                 const email = document.getElementById('email').value;
                 const tipo = document.getElementById('tipo').value;
-                
-                if (!client_id || !email) {
-                    alert('Completa todos los campos');
-                    return;
-                }
-                
+                if (!client_id || !email) { alert('Completa todos los campos'); return; }
                 await enviarGenerarLicencia(client_id, email, tipo);
             }
             
             async function generarLicenciaIlimitada() {
                 const client_id = document.getElementById('client_id').value;
                 const email = document.getElementById('email').value;
-                
-                if (!client_id || !email) {
-                    alert('Completa CLIENT_ID y Email');
-                    return;
-                }
-                
+                if (!client_id || !email) { alert('Completa CLIENT_ID y Email'); return; }
                 await enviarGenerarLicencia(client_id, email, 'ilimitada');
             }
             
@@ -541,22 +363,10 @@ def panel_admin():
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({client_id, email, tipo})
                     });
-                    
                     const data = await response.json();
-                    
                     if (data.exito) {
                         document.getElementById('codigo_generado').textContent = data.codigo;
-                        setTipoTexto(tipo);
-                        
-                        const resultado = document.getElementById('resultado');
-                        resultado.classList.add('activo');
-                        
-                        if (tipo === 'ilimitada') {
-                            resultado.classList.add('ilimitada');
-                        } else {
-                            resultado.classList.remove('ilimitada');
-                        }
-                        
+                        document.getElementById('resultado').classList.add('activo');
                         cargarClientes();
                     } else {
                         alert('Error: ' + data.mensaje);
@@ -576,33 +386,22 @@ def panel_admin():
                 try {
                     const response = await fetch('/lista-clientes');
                     const data = await response.json();
-                    
                     const tbody = document.querySelector('#tabla_clientes tbody');
                     tbody.innerHTML = '';
-                    
                     data.clientes.forEach(cliente => {
-                        let badge = '';
-                        if (cliente.tipo === 'ilimitada') {
-                            badge = '<span class="badge ilimitada">⭐ ILIMITADA</span>';
-                        } else if (cliente.tipo !== 'ninguna') {
-                            badge = '<span class="badge normal">' + cliente.tipo + '</span>';
-                        }
-                        
                         const fila = `
                             <tr>
                                 <td>${cliente.client_id}</td>
                                 <td>${cliente.email || '-'}</td>
                                 <td>${cliente.estado}</td>
-                                <td>${badge}</td>
+                                <td>${cliente.tipo}</td>
                                 <td>${cliente.dias || '-'}</td>
-                                <td>${cliente.expiracion && cliente.expiracion !== 'ILIMITADA' ? cliente.expiracion.substring(0, 10) : (cliente.expiracion === 'ILIMITADA' ? '∞' : '-')}</td>
+                                <td>${cliente.expiracion ? cliente.expiracion.substring(0, 10) : '-'}</td>
                             </tr>
                         `;
                         tbody.innerHTML += fila;
                     });
-                } catch (error) {
-                    console.error('Error:', error);
-                }
+                } catch (error) { console.error('Error:', error); }
             }
             
             cargarClientes();
