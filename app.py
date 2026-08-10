@@ -1,7 +1,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS - VERSIÓN VERCEL (CON ILIMITADA)         ║
-║  Datos en memoria (persistente durante sesión)                ║
+║     API DE LICENCIAS - VERSIÓN VERCEL (CON RESEND Y ILIMITADA) ║
+║   Datos en memoria (persistente durante sesión)               ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
@@ -10,6 +10,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta
 import os
+import resend  # Nueva librería para envíos rápidos por API
 
 app = Flask(__name__)
 
@@ -22,6 +23,9 @@ PASSWORD_GMAIL = os.environ.get('PASSWORD_GMAIL', 'addgxvmqoywvytht')
 EMAIL_PAYPAL = os.environ.get('EMAIL_PAYPAL', 'Ithan150395@gmail.com')
 
 CLAVE_SECRETA = "antianuncios_ipdroid_2024"
+
+# Clave de API de Resend cargada desde las variables de entorno de Vercel
+resend.api_key = os.environ.get('RESEND_API_KEY')
 
 # Datos en memoria
 clientes_en_memoria = {}
@@ -107,12 +111,12 @@ def validar_codigo_licencia(codigo):
         return False, "Error al validar"
 
 def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
-    """Envía el código de licencia por email"""
+    """Envía el código de licencia por email usando la API de Resend"""
     try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
+        if not resend.api_key:
+            print("Error: Falta la variable RESEND_API_KEY en Vercel")
+            return False
+
         asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
         
         if tipo_licencia == "ilimitada":
@@ -141,22 +145,18 @@ def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
         </html>
         """
         
-        mensaje = MIMEMultipart()
-        mensaje['From'] = EMAIL_GMAIL
-        mensaje['To'] = email_cliente
-        mensaje['Subject'] = asunto
+        # Parámetros para enviar correo vía HTTP API
+        params = {
+            "from": "Antianuncios iP&Droid <onboarding@resend.dev>",
+            "to": [email_cliente],
+            "subject": asunto,
+            "html": cuerpo_html
+        }
         
-        mensaje.attach(MIMEText(cuerpo_html, 'html'))
-        
-        servidor = smtplib.SMTP('smtp.gmail.com', 587)
-        servidor.starttls()
-        servidor.login(EMAIL_GMAIL, PASSWORD_GMAIL)
-        servidor.send_message(mensaje)
-        servidor.quit()
-        
+        resend.Emails.send(params)
         return True
     except Exception as e:
-        print(f"Error enviando email: {e}")
+        print(f"Error enviando email con Resend: {e}")
         return False
 
 # ============================================
@@ -236,7 +236,7 @@ def generar_licencia():
         
         guardar_licencias(licencias)
         
-        # Enviar email al cliente
+        # Enviar email al cliente vía Resend API
         enviar_email(email, codigo, tipo)
         
         # Actualizar cliente
