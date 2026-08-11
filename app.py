@@ -1,7 +1,7 @@
 """
 ╔═══════════════════════════════════════════════════════════════╗
-║     API DE LICENCIAS ANTIANUNCIOS - VERSIÓN UNIFICADA VERCEL  ║
-║         Panel Admin + Registro CLIENT_ID + Resend API          ║
+║     API DE LICENCIAS ANTIANUNCIOS - VERSIÓN GOOGLE APPS SCRIPT║
+║         Panel Admin + Registro CLIENT_ID + Envíos Gratis      ║
 ╚═══════════════════════════════════════════════════════════════╝
 """
 
@@ -10,7 +10,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta
 import os
-import resend
+import requests
 
 app = Flask(__name__)
 
@@ -21,8 +21,8 @@ app = Flask(__name__)
 CLAVE_SECRETA = os.environ.get("CLAVE_SECRETA", "antianuncios_ipdroid_2024")
 TU_EMAIL_PAYPAL = os.environ.get("PAYPAL_EMAIL", "Ithan150395@gmail.com")
 
-# Cargar API Key de Resend desde variables de entorno
-resend.api_key = os.environ.get("RESEND_API_KEY")
+# Tu URL de Google Apps Script recién creada
+GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwpPAPoVjIfxG0zu6NO80R9Ijf0tB8kf6YWOrrLQG8Tr-O3VOZFetUvpeDpfkiqcWw/exec"
 
 # Datos en memoria
 clientes_en_memoria = {}
@@ -84,12 +84,8 @@ def validar_codigo_licencia(codigo):
         return False, "Error al validar"
 
 def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
-    """Envía el correo a través de Resend API (Inmune a bloqueos SMTP de Vercel)"""
+    """Envía el correo a través de tu propia API en Google Apps Script"""
     try:
-        if not resend.api_key:
-            print("❌ Error: RESEND_API_KEY no está configurada en Vercel.")
-            return False, "Falta RESEND_API_KEY"
-
         asunto = "🎉 Tu Licencia Antianuncios iP&Droid"
         
         if tipo_licencia == "ilimitada":
@@ -121,17 +117,21 @@ def enviar_email(email_cliente, codigo, tipo_licencia="normal"):
         </html>
         """
         
-        params = {
-            "from": "Antianuncios iP&Droid <onboarding@resend.dev>",
-            "to": [email_cliente],
+        payload = {
+            "to": email_cliente,
             "subject": asunto,
             "html": cuerpo_html
         }
         
-        resend.Emails.send(params)
-        return True, "Enviado con éxito"
+        respuesta = requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=10)
+        
+        if respuesta.status_code == 200:
+            return True, "Enviado con éxito desde Google"
+        else:
+            return False, f"Error Google Status: {respuesta.status_code}"
+            
     except Exception as e:
-        print(f"❌ Error enviando email vía Resend: {e}")
+        print(f"❌ Error enviando email: {e}")
         return False, str(e)
 
 # ============================================
@@ -201,7 +201,7 @@ def generar_licencia():
         }
         guardar_licencias(licencias)
         
-        # Envío de correo mediante API HTTP
+        # Envío de correo mediante Google Apps Script
         exito_mail, msg_mail = enviar_email(email, codigo, tipo)
         
         clientes = cargar_clientes()
